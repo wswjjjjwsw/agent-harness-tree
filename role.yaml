@@ -1,0 +1,136 @@
+# tree-02 交付物：role 表（**数据**，不是逻辑）
+#
+# role = 「这个节点该怎么用模型」的配置模板；节点只声明 role，不直接配模型参数（76 §2.1）。
+# - 13 个旋钮逐字见 knobs 段；每个 role 必须 13 个都在（harness/role.py 加载即校验，不合法 raise）。
+# - tools（V2.2，Leo 2026-11-06 设计问题）：该 role 的 pi 工具 allowlist（逗号分隔），
+#   空串 = --no-tools。role 表是工具的唯一事实来源，build_argv 只从 knobs 读，
+#   不再按 role 名硬编码。may_write 声明需求，tools 声明能力，两边须对上。
+# - max_tokens 是【池子】字段（owner 裁决 task-def §3.2），**不是**第 13 个旋钮；
+#   加载期硬校验不变式：think_budget + out_budget <= max_tokens。
+# - acts 只给「父」三个 role（根/规划/决策）；执行/调研/审计不出现（76 §3.1）。
+#
+# 取值依据：76 §2.2（role 表）/ §七（参数映射表 + max_tokens 建议值表）/ §6.4（预算表）
+#           / §4.5.3（三种 act 的形状）
+#
+# 【2026-11-05 t-127a5611b759】ctx_budget 全表统一为 32768（每会话 32K 默认起点，用户要求实测）：
+#   根/审计本来就是 32768；规划/决策 16384→32768；执行/调研 8192→32768；
+#   三个父 role 的 spawn act 8192→32768（Tier1b 终局即 spawn 被拒：history 9315+489 > 8192）。
+#   32768 远低于服务端原生窗口 262144 与 KV 预算 163840，不是盲目大值；只是上限，不是预留，实际用量不变。
+#   max_tokens（输出池子）与 think/out_budget 一律不动。
+#   另：候选 spawn=8192 是基线快照 df03d4e 带入的旧值，生产同文件 spawn=16384。
+knobs: [thinking, may_spawn, ctx_budget, think_budget, out_budget,
+        min_ctx_tokens, min_out_chars, max_children_per_round,
+        may_write, tools, kind, role_prompt, max_rounds]
+
+driver:
+  nodes_max: 80            # 76 §2.3 闸④ / §6.4：驱动器侧总量上限，对模型不可见
+  width_max: 9             # 76 §6.4 软建议：每层 ≤9（D10 形状审查的触发阈值；role.validate 只校验 nodes_max）
+  depth_max: 3             # 76 §6.4 软建议：深度 3（同上）
+
+roles:
+  根:
+    thinking: none         # 基线段：真值由 acts 覆盖（plan=low / spawn=none / merge=low，§4.5.3）
+    may_spawn: true        # 76 §2.3 闸①：只有 根/规划/决策 能拉子
+    ctx_budget: 32768      # 76 §2.2：根读远端大框架 + 全部遗留问题清单
+    think_budget: 4096     # 76 §七：父基线 4096（acts 里再覆盖）
+    out_budget: 2048       # 76 §七：父基线 2048
+    min_ctx_tokens: 4096   # 76 §2.2 ★：读完 4k 上下文的父才有资格决定树往哪长
+    min_out_chars: 0       # 父的产出下限由契约（契约必填键）管，不设字数下限
+    max_children_per_round: 3   # 76 §2.3 闸②：每轮硬截 3
+    may_write: false
+    tools: ""
+    kind: text
+    role_prompt: prompts/根.md
+    max_rounds: 8          # 76 §4.5.5 / §6.4：根 8 轮，到数强制收束
+    max_tokens: 8192       # 池子：父 plan/merge 8192（§七）
+  规划:
+    thinking: none
+    may_spawn: true
+    ctx_budget: 32768      # t-127a：统一 32K（原 76 §2.2 非根父 16k）
+    think_budget: 4096
+    out_budget: 2048
+    min_ctx_tokens: 4096
+    min_out_chars: 0
+    max_children_per_round: 3
+    may_write: false
+    tools: ""
+    kind: text
+    role_prompt: prompts/规划.md
+    max_rounds: 6
+    max_tokens: 8192
+  决策:
+    thinking: none
+    may_spawn: true
+    ctx_budget: 32768      # t-127a：统一 32K（原 76 §2.2 非根父 16k）
+    think_budget: 4096
+    out_budget: 2048
+    min_ctx_tokens: 4096
+    min_out_chars: 0
+    max_children_per_round: 3
+    may_write: false
+    tools: ""
+    kind: text
+    role_prompt: prompts/决策.md
+    max_rounds: 6
+    max_tokens: 8192
+  执行:
+    thinking: none         # 76 §2.2 纪律①：产出越长越要关思考（长产出配开思考 = 987s）
+    may_spawn: false       # 递归在形状上断掉
+    ctx_budget: 32768      # t-127a：统一 32K（叶单轮也攒工具历史，8192 同属人为限）
+    think_budget: 0
+    out_budget: 4500
+    min_ctx_tokens: 0
+    min_out_chars: 0       # 2026-11-12：字数下限取消；文档要求见 prompts/执行.md
+    max_children_per_round: 0   # 不拉子的 role = 0
+    may_write: true        # 唯一能产生 doc/edits 的 role
+    tools: "read,bash,grep,find,ls,write"
+    kind: text
+    role_prompt: prompts/执行.md
+    max_rounds: 1
+    max_tokens: 8192       # 池子：执行 8192（§七）
+  调研:
+    thinking: none
+    may_spawn: false
+    ctx_budget: 32768      # t-127a：统一 32K（叶单轮也攒工具历史，8192 同属人为限）
+    think_budget: 0
+    out_budget: 2048
+    min_ctx_tokens: 0
+    min_out_chars: 0       # 2026-11-12：字数下限取消
+    max_children_per_round: 0
+    may_write: false       # 读现有系统找事实，不改任何东西
+    tools: "read,bash,grep,find,ls"
+    kind: text
+    role_prompt: prompts/调研.md
+    max_rounds: 1
+    max_tokens: 4096       # 池子：调研 4096（§七）
+  审计:
+    thinking: low          # 76 §2.2：审计是全量 prefill + 短判断 ⇒ 开思考也只开 low（D9）
+    may_spawn: false
+    ctx_budget: 32768      # 76 §2.2：审计 = 全量 prefill 待审内容
+    think_budget: 4096
+    out_budget: 2048
+    min_ctx_tokens: 4096   # 待审内容不足 4k ⇒ 没什么可审的
+    min_out_chars: 0
+    max_children_per_round: 0
+    may_write: false
+    tools: ""
+    kind: text
+    role_prompt: prompts/审计.md
+    max_rounds: 1
+    max_tokens: 8192       # 池子：审计 8192（§七）
+
+# 父的一生三种 act（76 §4.5.3）。基线 ⊕ 这里的覆盖 = effective(role, act)。
+# 只允许覆盖 ACT_KEYS = thinking / ctx_budget / think_budget / out_budget / max_tokens。
+acts:
+  根:
+    plan:  {thinking: low,  ctx_budget: 32768, think_budget: 4096, out_budget: 2048, max_tokens: 8192}
+    spawn: {thinking: none, ctx_budget: 32768, think_budget: 0,    out_budget: 2048, max_tokens: 4096}
+    merge: {thinking: low,  ctx_budget: 32768, think_budget: 4096, out_budget: 2048, max_tokens: 8192}
+  规划:
+    plan:  {thinking: low,  ctx_budget: 32768, think_budget: 4096, out_budget: 2048, max_tokens: 8192}
+    spawn: {thinking: none, ctx_budget: 32768, think_budget: 0,    out_budget: 2048, max_tokens: 4096}
+    merge: {thinking: low,  ctx_budget: 32768, think_budget: 4096, out_budget: 2048, max_tokens: 8192}
+  决策:
+    plan:  {thinking: low,  ctx_budget: 32768, think_budget: 4096, out_budget: 2048, max_tokens: 8192}
+    spawn: {thinking: none, ctx_budget: 32768, think_budget: 0,    out_budget: 2048, max_tokens: 4096}
+    merge: {thinking: low,  ctx_budget: 32768, think_budget: 4096, out_budget: 2048, max_tokens: 8192}

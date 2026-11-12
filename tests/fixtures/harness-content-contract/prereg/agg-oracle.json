@@ -1,0 +1,1 @@
+{"files": {"month-01.txt": {"lines": 25, "sum": 11292}, "month-02.txt": {"lines": 22, "sum": 9788}, "month-03.txt": {"lines": 22, "sum": 12218}, "month-04.txt": {"lines": 30, "sum": 14930}, "month-05.txt": {"lines": 21, "sum": 9944}, "month-06.txt": {"lines": 28, "sum": 13097}}, "total_lines": 148, "total_sum": 71269, "max": 988, "min": 18}
