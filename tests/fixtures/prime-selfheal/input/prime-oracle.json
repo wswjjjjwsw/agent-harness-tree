@@ -1,0 +1,7 @@
+{
+  "range_start": 1,
+  "range_end": 1000,
+  "inclusive": true,
+  "prime_count": 168,
+  "method": "independent trial division"
+}

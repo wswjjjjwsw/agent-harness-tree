@@ -1,0 +1,29 @@
+{
+  "schema": "harness-prereg/v1",
+  "case": "prime-selfheal",
+  "note": "公开夹具：sha256 与判据在第一次模型调用前冻结，之后只许追加。任务文件不含机器名/绝对路径。",
+  "oracle": {
+    "authoritative": "input/prime-oracle.json",
+    "prime_count": 168,
+    "expected_report": "oracle/report.expected.md"
+  },
+  "files_sha256": {
+    "authority.json": "18e573c7f480708d029dfce1b599e15647b4c3e798078aa70fa119c575d87c35",
+    "input/q01.md": "39138872742d5cf3d5ca87028b6fb4aacf49af10c77e2bd0fd3762881e874f25",
+    "input/prime-oracle.json": "07350ede954c418a3acae666d47b94824ba116bf5033bfcc0fc8316d59a554b5",
+    "product/answer.txt": "c02efad74c4db35b2450beec922eb590d202b34c5b436bff0b6acc15059f5d21",
+    "blocks/prime-report.md": "2b3bcc62b63de9121918a839aa4695726e13610a7a4da7c063a36949062cab84",
+    "blocks/untouched-reference.md": "427b5e4f3b58f8e508517c5e596d0a05bf0a5b67be70bc6683e24839868c6146",
+    "oracle/report.expected.md": "39eb567252af1a3aff3ed114ba22589a9c545f84c7cca53b0a6421b131762dcf"
+  },
+  "acceptance": [
+    "1 终审记录出 blocker，且 blocker 引用 blocks/prime-report.md",
+    "2 驱动器创建真实修复叶并绑定该报告（节点 id 含 .fix.）",
+    "3 报告改为 168，且不再含 '186 primes'",
+    "4 product/answer.txt 与 blocks/untouched-reference.md 哈希不变",
+    "5 预置叶 root.c1.1 不重跑（rounds.jsonl 中不出现第二次 start）",
+    "6 同一 run id 内 root 完成",
+    "7 最后一条 final_audit.jsonl 的 blocker 数为 0",
+    "8 authority.json 的 writable 清单未被改"
+  ]
+}

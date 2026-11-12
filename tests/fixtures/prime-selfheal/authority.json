@@ -1,0 +1,5 @@
+{
+  "authoritative": ["input/prime-oracle.json"],
+  "read_only": ["input/", "product/answer.txt", "blocks/untouched-reference.md"],
+  "writable": ["blocks/prime-report.md", "doc/"]
+}
