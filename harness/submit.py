@@ -220,7 +220,8 @@ def judge_keys_note() -> str:
     return ""
 
 
-def contract_note(act: str, knobs: dict = None, ack_leaf: bool = False) -> str:
+def contract_note(act: str, knobs: dict = None, ack_leaf: bool = False,
+                  managed_doc: bool = False) -> str:
     """契约说明（该 act 的必填键清单）—— 拼进 prompt 的第三段。
 
     ★ 本批（tree-12 Part A）只**追加**两段，既有三段一字未动：
@@ -252,8 +253,10 @@ def contract_note(act: str, knobs: dict = None, ack_leaf: bool = False) -> str:
     lines.append("只输出一个 JSON 对象，不要额外解释。")
     sn = shape_note(act)
     if sn:
-        if os.environ.get("TREE_STRUCTURED") == "1":
-            sn = sn.replace("你写进去的那个路径", "完整正文")
+        # managed-doc 修复叶：Harness 负责把 doc 写回目标文件，doc 必须是正文而不是路径。
+        # 旧契约只在 TREE_STRUCTURED=1 时替换，pi 路径会把「路径」写进 doc 而被判形状不合。
+        if os.environ.get("TREE_STRUCTURED") == "1" or managed_doc:
+            sn = sn.replace("你写进去的那个路径", "完整正文（不是路径）")
         lines.append(sn)
     if key == "spawn":
         # ★ R2：取值域进 prompt（既有三段一字不改，只**追加**这一段）。
@@ -323,7 +326,8 @@ def assemble_prompt(node: dict, knobs: dict, act: str = None,
     if why:
         raise blocks_mod.RefUnresolved(why)
     ctx = _truncate_to_tokens(ctx_res, (knobs or {}).get("ctx_budget"))
-    contract = contract_note(act, knobs=knobs, ack_leaf=ack_leaf)
+    contract = contract_note(act, knobs=knobs, ack_leaf=ack_leaf,
+                                managed_doc=bool((node or {}).get("_managed_doc")))
     # ── 修-3（tree-13 B1）：每一块**分别**过 6000/260 截断（解引用与 token 截断都在它之前）──
     #   ★ 记账落点 = 该节点的 run 目录（`node["_run_dir"]`，驱动器/叶子给它）；拿不到 ⇒ 只截不记
     #     （绝不因为记账落点缺失而判拒或抛 —— 截断本身是兜底，不是判据）。

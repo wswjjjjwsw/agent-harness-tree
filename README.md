@@ -139,7 +139,7 @@ python -m unittest discover -s tests -p 'test_*.py'
 | G2 q01 | PASS：`product/answer.txt == "168\n"` |
 | G2 agg2 | PASS：`product/agg.json` 逐键等于 oracle |
 | B 自愈 | 见 `docs/acceptance.md`（修复前两次 FAIL，修复后待填） |
-| 离线测试 | 107 项（Python 3.9.6） |
+| 离线测试 | 114 项（Python 3.9.6） |
 
 ---
 

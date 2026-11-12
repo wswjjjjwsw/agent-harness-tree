@@ -13,6 +13,20 @@ class _NoTiming:
         return None
 
 
+class ManagedDocPromptTests(unittest.TestCase):
+    def test_managed_doc_contract_requires_inline_text(self):
+        from harness import submit
+        node = node_mod.new_node(
+            "root.fix.audit1.1", "执行", parent="root", batch=4, act="leaf", round=1,
+            context="修复 blocks/prime-report.md", judge={"json_keys": ["reply"]},
+            验收标准="报告计数为 168", auth="只改 blocks/prime-report.md")
+        node["_managed_doc"] = {"target": "blocks/prime-report.md"}
+        prompt = submit.assemble_prompt(
+            node, {"may_write": True}, act="leaf", include_role_prompt=False)
+        self.assertIn("完整正文（不是路径）", prompt)
+        self.assertNotIn("你写进去的那个路径", prompt)
+
+
 class ManagedDocumentTests(unittest.TestCase):
     def _fixture(self, run_dir, output_doc):
         run = Path(run_dir)

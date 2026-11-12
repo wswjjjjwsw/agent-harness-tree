@@ -85,7 +85,7 @@ python -m unittest discover -s tests -p 'test_*.py'
 - 自愈策略 fingerprint / 策略耗尽；
 - 未决保留与已解决冲突丢弃。
 
-结果：107 项（Python 3.9.6）。
+结果：114 项（Python 3.9.6）。
 
 ## 如何复跑
 

@@ -175,6 +175,58 @@ def bound_fact_block(context: str, run_dir: str) -> str:
 _HARD_UNDECIDED = ("冲突", "授权", "判不了")
 
 
+def _audit_confirmed_conflict(p: dict, tree: dict, table: dict) -> bool:
+    """上一批只读叶已报告冲突，且父未决里仍有硬冲突 ⇒ 必须收束交终审。
+
+    根自己的「是否一致」只是待查问题（上一批是执行叶），仍可再派审计；
+    一旦审计/调研叶确认了冲突，再用子节点消化就是父在绕开终审。
+    """
+    unresolved = (p or {}).get("未决") or []
+    if not any(isinstance(x, dict) and str(x.get("type") or "") == "冲突"
+               for x in unresolved):
+        return False
+    try:
+        members = node_mod.batch_members(p, tree)
+    except Exception:                                            # noqa: BLE001
+        members = []
+    roles = (table or {}).get("roles") or {}
+    for cid in members:
+        child = tree.get(cid) or {}
+        row = roles.get(str(child.get("role") or "")) or {}
+        if row.get("may_write"):
+            continue
+        if any(isinstance(x, dict) and str(x.get("type") or "") == "冲突"
+               for x in (child.get("未决") or [])):
+            return True
+    return False
+
+
+def _hard_conflict_writable_targets(p: dict, ctx: str, role_name: str, driver) -> list:
+    """硬冲突未解决时，父不得在终审前派可写子节点改写冲突目标。
+
+    修复派生文件必须由终审 blocker 触发（_dispatch_repair_leaves）；否则父会
+    先自行修好，终审看不到冲突，上升/修复路径失去证据。只拦 may_write 的
+    role，且 context 必须点名 authority.writable 里的路径；审计/调研不受限。
+    """
+    unresolved = (p or {}).get("未决") or []
+    if not any(isinstance(x, dict) and str(x.get("type") or "") == "冲突"
+               for x in unresolved):
+        return []
+    table = getattr(driver, "table", None) or {}
+    row = ((table.get("roles") or {}).get(str(role_name)) or {})
+    if not row.get("may_write"):
+        return []
+    run_dir = str(getattr(driver, "run_dir", "") or "")
+    try:
+        from harness import authority as _auth
+        policy = _auth.load_policy(run_dir)
+    except Exception:                                            # noqa: BLE001
+        return []
+    text = str(ctx or "")
+    return [str(rel) for rel in (policy.get("writable") or [])
+            if rel and str(rel).rstrip("/") in text]
+
+
 def _merge_unresolved(previous: list, current: list, run_dir: str = None) -> list:
     """合并父节点未决：新产出为准，但上一轮的硬未绝不会被静默吞掉。
 
@@ -1405,6 +1457,9 @@ class Driver:
                     _parts.append("同类重派被拒 %d 条（role 已连续失败，须换 role、记未决或派修复叶）" % _d["same_kind"])
                 if _d.get("nodes_max"):
                     _parts.append("超量 %d 条（节点数已达上限）" % _d["nodes_max"])
+                if _d.get("audit_first"):
+                    _parts.append("冲突未决期间改写目标被拒 %d 条（须先收束，由终审派修复叶）"
+                                  % _d["audit_first"])
                 _why = "；".join(_parts) if _parts else "未记录拒因（见 violations.jsonl）"
                 return ("spawn 无有效子节点：%d 条 children 全被拒（%s），该轮不算数，父须按拒因重 plan"
                     % (len(obj.get("children") or []), _why))
@@ -1418,6 +1473,17 @@ class Driver:
         if act == "merge":
             p["merge"] = obj
             go = obj.get("去向")
+            # 2026-11-13：审计/调研叶已确认冲突时，父坚持再派/切分 ⇒ 强制收束。
+            # 冲突不靠再加子节点消化；先由终审记录 blocker，再派修复叶。
+            if go != "收束" and _audit_confirmed_conflict(p, self.tree, self.table):
+                obj = dict(obj)
+                obj["去向"] = "收束"
+                obj.setdefault("uncovered", [])
+                p["merge"] = obj
+                gate.log_violation(
+                    self.sink, kind="驱动_硬冲突强制收束", node_id=str(p["id"]),
+                    detail="审计/调研叶已确认冲突，父仍要再派 ⇒ 强制收束，交终审记录 blocker 并派修复叶")
+                go = "收束"
             if go == "收束":
                 # ── ⑤ tree-04 插入点：收束判定的落点（§2.4 ⑤ / §3.8）──
                 #   ★ 父不许先置「完成」再回退（完成/失败 是封闭终态，assert①）⇒ 先判定、后置完成。
@@ -2246,7 +2312,8 @@ class Driver:
         empty_dropped = []
         # V2: 拒因按类计数（旧值只记空叶数，apply_output 把一切空出都报成“无可核验
         # 目标”——routeB-02 的 12 条同类拒收全被错报成形状问题，根 4 次修错方向）。
-        _drops = {"empty": 0, "same_error": 0, "same_kind": 0, "nodes_max": 0}
+        _drops = {"empty": 0, "same_error": 0, "same_kind": 0, "nodes_max": 0,
+                  "audit_first": 0}
         # V2.1 收尾 (B1) 要点：F2 用 plan children 的原始序号对应，过滤掉的子不登记；
         # F3 ID 带轮次，跨轮重派不混淆。
         try:
@@ -2304,6 +2371,17 @@ class Driver:
             # 换措辞绕过了 P2 的同错重派守卫（context 不完全相同），三次同形失败。
             # 只计失败叶（完成/部分不计），只拦同 role，不拦其他 role。
             _role = str(ch.get("role") or "")
+            # 2026-11-13：硬冲突未解决时，父不得在终审前派可写子节点改写冲突目标；
+            # 修复必须由终审 blocker 触发（终审先记录冲突，再派修复叶）。
+            _conflict_targets = _hard_conflict_writable_targets(p, _ctx, _role, self)
+            if _conflict_targets:
+                gate.log_violation(
+                    self.sink, kind="驱动_冲突修复须走终审", node_id=str(p["id"]),
+                    detail=("硬冲突未解决，拒绝可写子节点 %s 在终审前改写 %s；"
+                            "须先收束，由终审记录 blocker 再派修复叶"
+                            % (_role, ",".join(_conflict_targets))))
+                _drops["audit_first"] += 1
+                continue
             _fail_n = 0
             if _role:
                 for _mid in node_mod.subtree_ids(str(p["id"]), self.tree):

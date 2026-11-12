@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -112,6 +113,75 @@ class RepairTargetBoundaryTests(unittest.TestCase):
             policy = authority.load_policy(tmp)
             self.assertFalse(authority.is_writable("product/answer.txt", policy))
             self.assertTrue(authority.is_writable("blocks/prime-report.md", policy))
+
+
+class AuditConfirmedConflictTests(unittest.TestCase):
+    TABLE = {"roles": {"执行": {"may_write": True},
+                       "审计": {"may_write": False}}}
+
+    def test_readonly_child_conflict_forces_converge(self):
+        parent = {"未决": [{"type": "冲突", "what": "186 vs 168", "why": "x"}],
+                  "batch": 3}
+        tree = {"root.c3.1": {"role": "审计",
+                              "未决": [{"type": "冲突", "what": "186 vs 168",
+                                      "why": "x"}]}}
+        with unittest.mock.patch.object(driver.node_mod, "batch_members",
+                                        return_value=["root.c3.1"]):
+            self.assertTrue(driver._audit_confirmed_conflict(
+                parent, tree, self.TABLE))
+
+    def test_writer_child_does_not_confirm(self):
+        parent = {"未决": [{"type": "冲突", "what": "x", "why": "y"}], "batch": 1}
+        tree = {"root.c1.1": {"role": "执行",
+                              "未决": [{"type": "冲突", "what": "x", "why": "y"}]}}
+        with unittest.mock.patch.object(driver.node_mod, "batch_members",
+                                        return_value=["root.c1.1"]):
+            self.assertFalse(driver._audit_confirmed_conflict(
+                parent, tree, self.TABLE))
+
+    def test_no_parent_conflict_does_not_force(self):
+        with unittest.mock.patch.object(driver.node_mod, "batch_members",
+                                        return_value=[]):
+            self.assertFalse(driver._audit_confirmed_conflict(
+                {"未决": []}, {}, self.TABLE))
+
+
+class ConflictBeforeTerminalAuditTests(unittest.TestCase):
+    def _driver(self, tmp):
+        return SimpleNamespace(
+            table={"roles": {"执行": {"may_write": True},
+                             "审计": {"may_write": False}}},
+            run_dir=tmp)
+
+    def test_writer_targeting_conflict_file_is_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "authority.json", {
+                "read_only": ["input/"],
+                "writable": ["blocks/prime-report.md", "doc/"]})
+            parent = {"未决": [{"type": "冲突", "what": "oracle 168 vs report 186",
+                                "why": "数值不一致"}]}
+            targets = driver._hard_conflict_writable_targets(
+                parent, "修正 blocks/prime-report.md 的计数", "执行",
+                self._driver(tmp))
+            self.assertEqual(targets, ["blocks/prime-report.md"])
+
+    def test_audit_leaf_stays_allowed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "authority.json", {
+                "read_only": ["input/"],
+                "writable": ["blocks/prime-report.md"]})
+            parent = {"未决": [{"type": "冲突", "what": "x", "why": "y"}]}
+            self.assertEqual(driver._hard_conflict_writable_targets(
+                parent, "核对 blocks/prime-report.md 与 oracle", "审计",
+                self._driver(tmp)), [])
+
+    def test_no_conflict_does_not_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "authority.json", {
+                "writable": ["blocks/prime-report.md"]})
+            self.assertEqual(driver._hard_conflict_writable_targets(
+                {"未决": []}, "修正 blocks/prime-report.md", "执行",
+                self._driver(tmp)), [])
 
 
 class RoutingLedgerTests(unittest.TestCase):

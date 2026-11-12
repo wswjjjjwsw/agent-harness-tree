@@ -797,6 +797,8 @@ def build_repair_child(spec: dict, run_dir: str, tree: dict = None,
                      "doc 必须原样保留当前目标文件的全部有效内容并补足为完整修复后正文，"
                      "不得是路径、摘要或 JSON 文本。文档必须真实：不得声称执行过未执行的操作，"
                      "不得编造数据。Harness 只会将 doc 写入已绑定目标文件。")
+        lines.append('示例（形状照抄；doc 的值是完整正文，不是路径）：'
+                     '{"reply":"已修复并核对","未决":[],"doc":"<目标文件的完整正文>"}')
     else:
         lines.append("只改目标文件/相关产物，不另开新题；完成后只输出契约 JSON。")
 
