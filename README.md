@@ -106,9 +106,11 @@ harness/            # 运行时包（stage 1 扁平；模块职责见 docs/archi
   audit.py          # 审计账本与检查点
   schema.py         # 契约
   contract.py       # 失败分类与恢复策略
+  cli.py            # run / verify / demo（复用 leafrun，不改调度语义）
 tests/              # 离线 unittest，不联网、不调模型
+  fixtures/prime-selfheal/  # B 夹具：186 vs 168 的权威冲突 + 冻结哈希
 examples/
-  prime-report/     # 168 vs 186 的权威冲突示例
+  prime-report/     # 168 vs 186 的权威冲突示例（含离线桩与一键脚本）
 docs/
   architecture.md
   escalation.md
@@ -123,9 +125,12 @@ docs/
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 python -m unittest discover -s tests -p 'test_*.py'
+
+# 不接模型也能跑的一次完整自愈闭环（确定性桩）
+agent-harness-tree demo prime-report
 ```
 
-离线测试覆盖：状态机、schema、证据、终审、裁决回执、权威方向、sandbox profile、自愈策略。
+离线测试覆盖：状态机、schema、证据、终审、裁决回执、权威方向、sandbox profile、自愈策略、prime-report 夹具契约。
 
 真实运行需要本地模型服务（mlx_vlm / LLAAT）和 pi；见 `docs/architecture.md` 的 Runtime 一节。
 
@@ -138,8 +143,8 @@ python -m unittest discover -s tests -p 'test_*.py'
 | A 裁决恢复 | PASS：真实 Leo pass 回执，8/8 检查，跨进程恢复 |
 | G2 q01 | PASS：`product/answer.txt == "168\n"` |
 | G2 agg2 | PASS：`product/agg.json` 逐键等于 oracle |
-| B 自愈 | 见 `docs/acceptance.md`（修复前两次 FAIL，修复后待填） |
-| 离线测试 | 114 项（Python 3.9.6） |
+| B 自愈 | PASS：报告 186 → 168，oracle/受保护产物哈希不变，终审 0 blocker（run `b-selfheal-content-20261113-12`，`control.py verify-live` 8/8；详见 `docs/acceptance.md` 的 B 章节） |
+| 离线测试 | 125 项（本机 Python 3.13：125 OK / 1 skip；CI 覆盖 3.9 / 3.11） |
 
 ---
 
